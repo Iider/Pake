@@ -1,0 +1,20 @@
+{
+  "productName": "Kimi",
+  "identifier": "com.pake.kimi",
+  "version": "3.15.6",
+  "app": {
+    "withGlobalTauri": true,
+    "trayIcon": {
+      "iconPath": "png/icon_512.png",
+      "iconAsTemplate": false,
+      "id": "pake-tray"
+    },
+    "security": {
+      "headers": {},
+      "csp": null
+    }
+  },
+  "build": {
+    "frontendDist": "../dist"
+  }
+}

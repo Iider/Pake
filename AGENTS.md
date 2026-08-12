@@ -33,6 +33,8 @@ Pake/
 ├── schema/               # pake.schema.json: --config JSON schema (public contract)
 ├── plugins/              # Claude Code plugin source (user-facing pake skill)
 ├── llms.txt              # Agent-facing contract summary (--json, --config, exit codes)
+├── kimi/                 # Local Kimi Code client overlay (config + icons); build steps in kimi/README.md
+├── KIMI_CLIENT_HANDOFF.md # Kimi Code desktop client notes (kimi web lifecycle, theme sync)
 ├── scripts/              # Utility scripts
 ├── tests/                # Unit, integration, and release-flow tests
 ├── .github/workflows/     # quality/test and release automation

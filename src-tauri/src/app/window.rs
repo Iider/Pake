@@ -79,6 +79,58 @@ pub fn open_additional_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     build_window_with_label(app, &state.pake_config, &state.tauri_config, &label)
 }
 
+/// Open a secondary window on a specific page of the same app. Used by the
+/// Kimi sidebar "open in new window" session menu item; the caller validates
+/// that the URL shares the home origin.
+pub fn open_window_with_url(app: &AppHandle, url: Url) -> tauri::Result<WebviewWindow> {
+    let state = app.state::<MultiWindowState>();
+    let label = state.next_window_label();
+    build_window(
+        app,
+        &state.pake_config,
+        &state.tauri_config,
+        WindowBuildOptions {
+            label: &label,
+            url: WebviewUrl::External(url.clone()),
+            visible: false,
+            new_window_features: None,
+            url_override: Some(url),
+        },
+    )
+}
+
+/// Open a deep-linked secondary window without constructing WebView2 from an
+/// IPC callback thread. Windows can stall when a webview is built synchronously
+/// inside an invoke command, so mirror the proven Cmd+N multi-window path.
+pub fn open_window_with_url_safe(app: &AppHandle, url: Url) {
+    #[cfg(target_os = "windows")]
+    {
+        let app_handle = app.clone();
+        std::thread::spawn(move || match open_window_with_url(&app_handle, url) {
+            Ok(window) => {
+                let fallback = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(3_000)).await;
+                    reveal_built_window(&fallback);
+                });
+            }
+            Err(error) => eprintln!("[Pake] Failed to open deep-linked window: {error}"),
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    match open_window_with_url(app, url) {
+        Ok(window) => {
+            let fallback = window.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(3_000)).await;
+                reveal_built_window(&fallback);
+            });
+        }
+        Err(error) => eprintln!("[Pake] Failed to open deep-linked window: {error}"),
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn taskbar_icon_handle() -> Option<isize> {
     static TASKBAR_ICON: OnceLock<Option<isize>> = OnceLock::new();
@@ -150,11 +202,47 @@ pub fn reapply_window_icon(window: &WebviewWindow) {
 #[cfg(not(target_os = "windows"))]
 pub fn reapply_window_icon(_window: &WebviewWindow) {}
 
+/// Paint the native title bar with the page's `theme-color` so the caption
+/// matches the web content (e.g. Kimi Code Web's #121212 dark surface).
+/// Windows 11+ honors the attribute; older builds reject it and keep the
+/// system caption color.
+#[cfg(target_os = "windows")]
+pub fn set_titlebar_color(window: &WebviewWindow, rgb: u32) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
+
+    // DWM expects COLORREF (0x00BBGGRR); the page hands us #RRGGBB.
+    let colorref = ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb & 0xFF0000) >> 16);
+    match window.hwnd() {
+        Ok(hwnd) => unsafe {
+            let result = DwmSetWindowAttribute(
+                hwnd.0,
+                DWMWA_CAPTION_COLOR as u32,
+                &colorref as *const _ as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+            if result < 0 {
+                eprintln!("[Pake] Failed to set the title bar color: HRESULT 0x{result:08X}");
+            }
+        },
+        Err(error) => {
+            eprintln!(
+                "[Pake] Failed to resolve the window handle for its title bar color: {error}"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_titlebar_color(_window: &WebviewWindow, _rgb: u32) {}
+
 struct WindowBuildOptions<'a> {
     label: &'a str,
     url: WebviewUrl,
     visible: bool,
     new_window_features: Option<NewWindowFeatures>,
+    /// Initial page that replaces the home URL from pake.json (session
+    /// deep links opened from the Kimi sidebar menu).
+    url_override: Option<Url>,
 }
 
 fn open_requested_window(
@@ -175,6 +263,7 @@ fn open_requested_window(
             url: WebviewUrl::External(target_url.clone()),
             visible: true,
             new_window_features: Some(features),
+            url_override: None,
         },
     )?;
 
@@ -324,6 +413,7 @@ fn build_window_with_label(
             url,
             visible: false,
             new_window_features: None,
+            url_override: None,
         },
     )
 }
@@ -339,6 +429,7 @@ fn build_window(
         url,
         visible,
         new_window_features,
+        url_override,
     } = opts;
     let package_name = tauri_config
         .product_name
@@ -363,16 +454,34 @@ fn build_window(
         None
     };
 
+    let start_on_blank = crate::app::kimi_web::ENABLED && label == "pake";
+
     // The delegate must be installed before the first TLS challenge. Start on
     // a neutral page, then navigate from the with_webview callback below.
+    // Kimi web client builds also start on a blank page: the local server may
+    // not be listening yet, and the page-load reveal gate skips about: URLs.
+    // Once the server is up, app::kimi_web navigates to the authenticated UI.
     #[cfg(target_os = "macos")]
-    let url = if cert_bypass_target.is_some() {
+    let url = if cert_bypass_target.is_some() || start_on_blank {
         WebviewUrl::CustomProtocol(
             Url::parse("about:blank").expect("about:blank must be a valid URL"),
         )
     } else {
         url
     };
+
+    #[cfg(not(target_os = "macos"))]
+    let url = if start_on_blank {
+        WebviewUrl::CustomProtocol(
+            Url::parse("about:blank").expect("about:blank must be a valid URL"),
+        )
+    } else {
+        url
+    };
+
+    // Deep links (Kimi session windows) target one page of the packaged app
+    // instead of the home URL.
+    let url = url_override.map(WebviewUrl::External).unwrap_or(url);
 
     let user_agent = config.user_agent.get();
 
@@ -483,6 +592,7 @@ fn build_window(
         .initialization_script(include_str!("../inject/event.js"))
         .initialization_script(include_str!("../inject/style.js"))
         .initialization_script(include_str!("../inject/theme_refresh.js"))
+        .initialization_script(include_str!("../inject/kimi_session_menu.js"))
         .initialization_script(include_str!("../inject/auth.js"))
         .initialization_script(include_str!("../inject/custom.js"));
 

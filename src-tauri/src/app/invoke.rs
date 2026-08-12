@@ -219,15 +219,35 @@ pub fn set_dock_badge_label(app: AppHandle, label: Option<String>) -> Result<(),
 }
 
 #[command]
-pub async fn update_theme_mode(app: AppHandle, mode: String) {
+pub async fn update_theme_mode(window: WebviewWindow, mode: String, color: Option<String>) {
     let theme = if mode == "dark" {
         Theme::Dark
     } else {
         Theme::Light
     };
-    for window in app.webview_windows().values() {
-        let _ = window.set_theme(Some(theme));
+    // The page can report its own surface color (Kimi keeps a matching
+    // `meta[name="theme-color"]`); fall back to the near-black dark surface so
+    // the caption never stays lighter than the content.
+    let rgb = color
+        .as_deref()
+        .and_then(parse_hex_color)
+        .unwrap_or(if mode == "dark" { 0x121212 } else { 0xFFFFFF });
+    // Theme state belongs to the calling page. Applying one window's report to
+    // every window makes independently rendered pages fight each other (for
+    // example, one light Kimi window and one stale dark window continuously
+    // repaint every native title bar). Keep each caption matched to its own
+    // webview instead.
+    let _ = window.set_theme(Some(theme));
+    crate::app::window::set_titlebar_color(&window, rgb);
+}
+
+/// Parse a `#RRGGBB` page color into an RGB integer; anything else is ignored.
+fn parse_hex_color(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
     }
+    u32::from_str_radix(hex, 16).ok()
 }
 
 // Apply native WebView zoom (WKWebView pageZoom / WebView2 ZoomFactor / WebKitGTK
@@ -264,4 +284,20 @@ pub fn webview_navigate(window: WebviewWindow, action: String) -> Result<(), Str
             "Unknown webview_navigate action '{other}' (expected reload|back|forward)"
         )),
     }
+}
+
+/// Open a Kimi Code session in its own window. The injected sidebar menu
+/// passes the session deep link; only URLs on the `kimi web` origin are
+/// accepted so the command cannot be abused to open arbitrary pages.
+#[command]
+pub fn open_session_window(app: AppHandle, url: String) -> Result<(), String> {
+    let Some(base) = crate::app::kimi_web::base_url() else {
+        return Err("Kimi web client is not enabled in this build".into());
+    };
+    let parsed = Url::parse(&url).map_err(|error| format!("Invalid session URL: {error}"))?;
+    if parsed.origin() != base.origin() {
+        return Err("Session URL must stay on the kimi web origin".into());
+    }
+    crate::app::window::open_window_with_url_safe(&app, parsed);
+    Ok(())
 }

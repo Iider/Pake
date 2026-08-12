@@ -28,7 +28,8 @@ const GDK_BACKEND: &str = "GDK_BACKEND";
 use app::{
     invoke::{
         clear_dock_badge, download_file, increment_dock_badge, send_notification, set_dock_badge,
-        set_dock_badge_label, set_zoom, update_theme_mode, webview_navigate,
+        open_session_window, set_dock_badge_label, set_zoom, update_theme_mode,
+        webview_navigate,
     },
     setup::{set_global_shortcut, set_system_tray},
     window::{
@@ -290,6 +291,10 @@ pub fn run_app() {
     #[cfg(target_os = "macos")]
     let reopen_revealed = startup_window_revealed.clone();
 
+    // Kimi web client builds (PAKE_KIMI_WEB=1) own a `kimi web` child process.
+    let kimi_child = app::kimi_web::shared_child();
+    let kimi_child_run = kimi_child.clone();
+
     app_builder
         .invoke_handler(tauri::generate_handler![
             download_file,
@@ -301,6 +306,7 @@ pub fn run_app() {
             update_theme_mode,
             set_zoom,
             webview_navigate,
+            open_session_window,
         ])
         .setup(move |app| {
             app.manage(MultiWindowState::new(
@@ -321,6 +327,9 @@ pub fn run_app() {
             // --- Menu Construction End ---
 
             let window = set_window(app.app_handle(), &pake_config, &tauri_config)?;
+            // Kimi web client builds: launch/attach `kimi web`, then navigate
+            // the (blank) main window to the authenticated UI once it listens.
+            app::kimi_web::start(window.clone(), kimi_child.clone());
             set_system_tray(
                 app.app_handle(),
                 show_system_tray,
@@ -395,6 +404,10 @@ pub fn run_app() {
             std::process::exit(1);
         })
         .run(move |_app, _event| {
+            // Stop the `kimi web` child this app spawned (Kimi client builds).
+            if matches!(_event, tauri::RunEvent::Exit) {
+                app::kimi_web::shutdown(&kimi_child_run);
+            }
             // Handle macOS dock icon click to reopen hidden window
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {

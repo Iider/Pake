@@ -2,6 +2,7 @@
 pub mod cert;
 pub mod config;
 pub mod invoke;
+pub mod kimi_web;
 #[cfg(target_os = "macos")]
 pub mod menu;
 pub mod navigation;
