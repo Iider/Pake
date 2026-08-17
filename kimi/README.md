@@ -33,12 +33,12 @@ git restore src-tauri/pake.json src-tauri/tauri.conf.json src-tauri/tauri.window
 
 ## 文件说明
 
-| 文件 | 作用 |
-| ---- | ---- |
-| `pake.json` | 窗口配置：`http://127.0.0.1:58627`、1400x900、`CmdOrCtrl+Shift+K` 唤起快捷键、`hide_on_close` |
-| `tauri.conf.json` | 产品名 Kimi、identifier `com.pake.kimi`、托盘图标 `png/icon_512.png` |
-| `tauri.windows.conf.json` | Windows bundle 图标与 resources |
-| `kimi.png` | 原始品牌图（`C:\Users\11696\Pictures\kimi.png` 的副本） |
-| `icon_*.png/ico`、`icon.*` | 由 kimi.png 生成的各尺寸图标 |
+| 文件                       | 作用                                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `pake.json`                | 窗口配置：`http://127.0.0.1:58627`、1400x900、隐藏标题栏、`CmdOrCtrl+Shift+K` 唤起快捷键、`hide_on_close` |
+| `tauri.conf.json`          | 产品名 Kimi、identifier `com.pake.kimi`、托盘图标 `png/icon_512.png`                                      |
+| `tauri.windows.conf.json`  | Windows bundle 图标与 resources                                                                           |
+| `kimi.png`                 | 原始品牌图（`C:\Users\11696\Pictures\kimi.png` 的副本）                                                   |
+| `icon_*.png/ico`、`icon.*` | 由 kimi.png 生成的各尺寸图标                                                                              |
 
 行为细节（`kimi web` 子进程拉起/Job Object 回收、顶栏随页面主题变色）见根目录 `KIMI_CLIENT_HANDOFF.md`。
